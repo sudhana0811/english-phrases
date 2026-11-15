@@ -54,6 +54,7 @@
 <div id="foot">
   <button id="undo">−1 취소</button>
   <button id="rate">속도 1×</button>
+  <button id="voice">음성</button>
   <button id="reload">시트 새로고침</button>
 </div>
 
@@ -61,9 +62,9 @@
 /* ===== 설정 ===== */
 const CONFIG = {
   // Apps Script 웹 앱 URL (…/exec). 비워 두면 샘플 문장으로 동작(횟수는 저장 안 됨).
-  API_URL: "https://script.google.com/macros/s/AKfycbwP-MkjEei2Drcn_qSVbqWNPNpFX-K9RuK8ERBVd-QjdhG8N88RBd0xYiXH2Bw64P5gVg/exec",
+  API_URL: "",
   // Code.gs의 TOKEN과 같은 값
-  TOKEN: "k8Xp2mQz9LrT4vBn7YcW1dFg5HjS3a",
+  TOKEN: "",
   LANG: "en-US",
 };
 
@@ -219,11 +220,21 @@ function bump(delta){
 }
 
 /* ===== 음성 ===== */
-let voice=null;
+let voice=null, voices=[];
 function pickVoice(){
   if(!("speechSynthesis" in window)) return;
-  const vs=speechSynthesis.getVoices();
-  voice = vs.find(v=>v.lang===CONFIG.LANG) || vs.find(v=>v.lang.startsWith("en")) || null;
+  const all=speechSynthesis.getVoices().filter(v=>v.lang&&v.lang.toLowerCase().startsWith("en"));
+  // en-US를 앞쪽에 정렬
+  voices=all.filter(v=>v.lang.replace("_","-")===CONFIG.LANG).concat(all.filter(v=>v.lang.replace("_","-")!==CONFIG.LANG));
+  const saved=store.get("ep_voice",null);
+  voice=voices.find(v=>v.name===saved)||voices[0]||null;
+  updateVoiceBtn();
+}
+function updateVoiceBtn(){
+  const b=$("voice"); if(!b) return;
+  if(!voices.length){ b.textContent="음성(없음)"; return; }
+  const n=voices.indexOf(voice)+1;
+  b.textContent=`음성 ${n}/${voices.length}`;
 }
 if("speechSynthesis" in window){ pickVoice(); speechSynthesis.onvoiceschanged=pickVoice; }
 function speak(){
@@ -244,6 +255,12 @@ $("reload").onclick=async()=>{ $("pos").textContent="불러오는 중…"; if(aw
 $("mode").onclick=()=>{
   const i=MODES.findIndex(m=>m[0]===mode); mode=MODES[(i+1)%MODES.length][0];
   store.set("ep_mode",mode); buildOrder(); idx=0; render();
+};
+$("voice").onclick=()=>{
+  if(!voices.length){ note("사용 가능한 영어 음성이 없습니다"); return; }
+  voice=voices[(voices.indexOf(voice)+1)%voices.length];
+  store.set("ep_voice",voice.name); updateVoiceBtn();
+  note(voice.name+" ("+voice.lang+")"); speak();
 };
 function updateRate(){ $("rate").textContent="속도 "+(rate===1?"1×":"0.8×"); }
 $("rate").onclick=()=>{ rate=rate===1?0.8:1; store.set("ep_rate",rate); updateRate(); };
