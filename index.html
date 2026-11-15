@@ -245,8 +245,8 @@ $("mode").onclick=()=>{
   const i=MODES.findIndex(m=>m[0]===mode); mode=MODES[(i+1)%MODES.length][0];
   store.set("ep_mode",mode); buildOrder(); idx=0; render();
 };
-function updateRate(){ $("rate").textContent="속도 "+(rate===1?"1×":"0.7×"); }
-$("rate").onclick=()=>{ rate=rate===1?0.7:1; store.set("ep_rate",rate); updateRate(); };
+function updateRate(){ $("rate").textContent="속도 "+(rate===1?"1×":"0.8×"); }
+$("rate").onclick=()=>{ rate=rate===1?0.8:1; store.set("ep_rate",rate); updateRate(); };
 updateRate();
 
 let sx=null, sy=null;
