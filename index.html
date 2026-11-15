@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Phrases">
+<title>English Phrases</title>
+<style>
+  :root{--bg:#111827;--card:#1f2937;--text:#f9fafb;--sub:#9ca3af;--accent:#60a5fa;--ok:#34d399;--line:#374151}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR","Hiragino Sans",sans-serif}
+  body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+  #tabs{display:flex;gap:8px;overflow-x:auto;padding:12px 14px 8px;flex:none;scrollbar-width:none}
+  #tabs::-webkit-scrollbar{display:none}
+  .chip{flex:none;border:1px solid var(--line);background:transparent;color:var(--sub);
+    padding:8px 16px;border-radius:999px;font-size:15px}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#0b1220;font-weight:700}
+  #bar{display:flex;justify-content:space-between;align-items:center;padding:4px 16px;color:var(--sub);font-size:13px;flex:none}
+  #bar button{background:none;border:1px solid var(--line);color:var(--sub);border-radius:8px;padding:5px 10px;font-size:13px}
+  #stage{flex:1;display:flex;align-items:center;justify-content:center;padding:8px 16px;min-height:0;touch-action:pan-y}
+  #card{width:100%;max-height:100%;overflow:auto;background:var(--card);border-radius:20px;padding:28px 22px;
+    text-align:center;transition:transform .18s ease,opacity .18s ease}
+  #card.out-l{transform:translateX(-40px);opacity:0}
+  #card.out-r{transform:translateX(40px);opacity:0}
+  #text{font-size:clamp(22px,6vw,30px);line-height:1.45;font-weight:600;word-break:break-word}
+  #note{margin-top:16px;font-size:16px;line-height:1.5;color:var(--sub);word-break:break-word}
+  #seen{margin-top:22px;font-size:14px;color:var(--ok)}
+  #msg{color:var(--sub);text-align:center;line-height:1.6;padding:0 12px;white-space:pre-line}
+  #ctrl{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:10px 16px 6px;flex:none}
+  #ctrl button,#done{border:none;border-radius:14px;font-size:20px;padding:14px 0;background:var(--card);color:var(--text)}
+  #ctrl button:active,#done:active{filter:brightness(1.3)}
+  #done{display:block;width:calc(100% - 32px);margin:6px 16px 4px;background:var(--ok);color:#052e1f;font-weight:800;font-size:19px}
+  #foot{display:flex;gap:8px;justify-content:center;padding:6px 16px 12px;flex:none}
+  #foot button{background:none;border:1px solid var(--line);color:var(--sub);border-radius:8px;padding:6px 12px;font-size:13px}
+  #pos{font-variant-numeric:tabular-nums}
+  .pop{animation:pop .25s ease}
+  @keyframes pop{50%{transform:scale(1.25)}}
+</style>
+</head>
+<body>
+<div id="tabs"></div>
+<div id="bar"><span id="pos"></span><button id="mode"></button></div>
+<div id="stage"><div id="card"><div id="msg">불러오는 중…</div></div></div>
+<div id="ctrl">
+  <button id="prev" aria-label="이전">◀</button>
+  <button id="speak" aria-label="음성">🔊</button>
+  <button id="next" aria-label="다음">▶</button>
+</div>
+<button id="done">✓ 봤어요</button>
+<div id="foot">
+  <button id="undo">−1 취소</button>
+  <button id="rate">속도 1×</button>
+  <button id="reload">시트 새로고침</button>
+</div>
+
+<script>
+/* ===== 설정 ===== */
+const CONFIG = {
+  // Apps Script 웹 앱 URL (…/exec). 비워 두면 샘플 문장으로 동작(횟수는 저장 안 됨).
+  API_URL: "",
+  // Code.gs의 TOKEN과 같은 값
+  TOKEN: "",
+  LANG: "en-US",
+};
+
+const SAMPLE = {tabs:[
+  {name:"연구",items:[{text:"I'm working on the formation of the Avataṃsaka Sūtra.",note:"화엄경의 성립을 연구하고 있습니다.",count:0},
+                      {text:"I compare the Chinese and Tibetan translations.",note:"한역과 티베트어역을 비교합니다.",count:0}]},
+  {name:"학회",items:[{text:"Thank you for the opportunity to present here.",note:"발표 기회를 주셔서 감사합니다.",count:0},
+                      {text:"Could you elaborate on that point?",note:"그 점을 좀 더 설명해 주시겠어요?",count:0}]},
+  {name:"여행",items:[{text:"Could you tell me how to get to the station?",note:"역에 가는 방법을 알려 주시겠어요?",count:0},
+                      {text:"I have a reservation under the name Park.",note:"박 이름으로 예약했습니다.",count:0}]},
+]};
+
+/* ===== 저장소 ===== */
+const store = {
+  get(k,d){ try{ const v=localStorage.getItem(k); return v===null?d:JSON.parse(v);}catch(e){return d;} },
+  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} },
+};
+const $=id=>document.getElementById(id);
+const keyOf=(tab,text)=>tab+"\u0001"+text;
+
+/* ===== 상태 ===== */
+const MODES=[["seq","순서대로"],["shuf","랜덤"],["least","적게 본 순"]];
+let data=null;                       // {tabs:[{name,items:[{text,note,count}]}]}
+let pending=store.get("ep_pending_v2",[]);   // 아직 시트에 반영 못 한 {tab,text,delta}
+let counts={};                       // key -> 표시용 횟수(서버값 + 미반영분)
+let tab=store.get("ep_tab",null);
+let mode=store.get("ep_mode","seq");
+let rate=store.get("ep_rate",1);
+let items=[], order=[], idx=0;
+
+function pendingSum(k){ return pending.reduce((s,p)=>keyOf(p.tab,p.text)===k?s+p.delta:s,0); }
+function rebuildCounts(){
+  counts={};
+  if(!data) return;
+  data.tabs.forEach(t=>t.items.forEach(it=>{
+    const k=keyOf(t.name,it.text); counts[k]=Math.max(0,(it.count||0)+pendingSum(k));
+  }));
+}
+const savePending=()=>store.set("ep_pending_v2",pending);
+
+/* ===== 서버 통신 ===== */
+function api(params){
+  const q=new URLSearchParams({token:CONFIG.TOKEN,...params});
+  return fetch(CONFIG.API_URL+"?"+q.toString(),{cache:"no-store"}).then(r=>{
+    if(!r.ok) throw new Error("HTTP "+r.status); return r.json();
+  });
+}
+let flushing=false;
+async function flush(){
+  if(!CONFIG.API_URL||flushing) return;
+  flushing=true;
+  try{
+    while(pending.length){
+      const p=pending[0];
+      let res;
+      try{ res=await api({action:"inc",tab:p.tab,text:p.text,delta:String(p.delta)}); }
+      catch(e){ break; }                          // 오프라인 등: 나중에 재시도
+      if(res&&res.error==="unauthorized"){ note("TOKEN이 맞지 않습니다"); break; }
+      pending.shift(); savePending();             // 성공 또는 '문장 없음' → 큐에서 제거
+      if(res&&res.ok){
+        const t=data&&data.tabs.find(x=>x.name===p.tab);
+        const it=t&&t.items.find(x=>x.text===p.text);
+        if(it) it.count=res.count;
+      }
+    }
+  } finally {
+    flushing=false;
+    rebuildCounts(); if(data) store.set("ep_data_v2",data);
+    updatePos();
+    if(items.length&&$("seen")) $("seen").textContent=seenText();
+  }
+}
+let noteTimer;
+function note(s){ $("pos").textContent=s; clearTimeout(noteTimer); noteTimer=setTimeout(updatePos,3000); }
+
+async function refresh(){
+  if(!CONFIG.API_URL){ data=SAMPLE; rebuildCounts(); return true; }
+  await flush();
+  try{
+    const res=await api({action:"list"});
+    if(res.error) throw new Error(res.error==="unauthorized"?"TOKEN이 맞지 않습니다":res.error);
+    data=res; store.set("ep_data_v2",data); rebuildCounts(); return true;
+  }catch(e){
+    if(data){ note("오프라인: 저장된 목록 표시 중"); return true; }
+    showError(e.message); return false;
+  }
+}
+function showError(msg){
+  $("card").innerHTML=""; const m=document.createElement("div"); m.id="msg";
+  m.textContent="시트를 읽지 못했습니다.\n· API_URL / TOKEN 설정\n· 웹 앱 배포 시 '액세스: 모든 사용자'\n를 확인해 주세요.\n("+msg+")";
+  $("card").appendChild(m); $("pos").textContent="";
+}
+
+/* ===== 탭/순서 ===== */
+function selectTab(name){
+  if(!data||!data.tabs.length){ items=[]; render(); return; }
+  if(!data.tabs.some(t=>t.name===name)) name=data.tabs[0].name;
+  tab=name; store.set("ep_tab",tab);
+  items=data.tabs.find(t=>t.name===tab).items;
+  buildOrder(); idx=0; renderTabs(); render();
+}
+function buildOrder(){
+  order=items.map((_,i)=>i);
+  if(mode==="shuf"){
+    for(let i=order.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [order[i],order[j]]=[order[j],order[i]]; }
+  }else if(mode==="least"){
+    order.sort((a,b)=>(counts[keyOf(tab,items[a].text)]||0)-(counts[keyOf(tab,items[b].text)]||0)||a-b);
+  }
+}
+
+/* ===== 표시 ===== */
+function renderTabs(){
+  const box=$("tabs"); box.innerHTML="";
+  (data?data.tabs:[]).forEach(t=>{
+    const b=document.createElement("button"); b.className="chip"+(t.name===tab?" on":""); b.textContent=t.name;
+    b.onclick=()=>selectTab(t.name); box.appendChild(b);
+  });
+}
+const cur=()=>items[order[idx]];
+const seenText=()=>`지금까지 ${counts[keyOf(tab,cur().text)]||0}번 봤어요`;
+function updatePos(){ $("pos").textContent= items.length? `${idx+1} / ${items.length}`+(pending.length?` · 미반영 ${pending.length}`:"") : ""; }
+function render(){
+  const card=$("card"); card.innerHTML="";
+  $("mode").textContent="↕ "+MODES.find(m=>m[0]===mode)[1];
+  if(!items.length){
+    const m=document.createElement("div"); m.id="msg";
+    m.textContent=`'${tab||""}' 탭에 문장이 없습니다.\nA열에 문장, B열에 메모를 넣어 주세요. (1행은 제목 행)`;
+    card.appendChild(m); updatePos(); return;
+  }
+  const it=cur();
+  const t=document.createElement("div"); t.id="text"; t.textContent=it.text; card.appendChild(t);
+  if(it.note){ const n=document.createElement("div"); n.id="note"; n.textContent=it.note; card.appendChild(n); }
+  const s=document.createElement("div"); s.id="seen"; s.textContent=seenText(); card.appendChild(s);
+  card.scrollTop=0; updatePos();
+}
+function go(d){
+  if(!items.length) return;
+  const card=$("card"); card.classList.add(d>0?"out-l":"out-r");
+  setTimeout(()=>{ idx=(idx+d+items.length)%items.length; render(); card.classList.remove("out-l","out-r"); },150);
+}
+
+/* ===== 횟수 ===== */
+function bump(delta){
+  if(!items.length) return;
+  const text=cur().text, k=keyOf(tab,text);
+  const now=counts[k]||0;
+  if(delta<0&&now===0) return;
+  counts[k]=now+delta;
+  pending.push({tab,text,delta}); savePending();
+  const s=$("seen"); s.textContent=seenText();
+  s.classList.remove("pop"); void s.offsetWidth; s.classList.add("pop");
+  updatePos(); flush();
+}
+
+/* ===== 음성 ===== */
+let voice=null;
+function pickVoice(){
+  if(!("speechSynthesis" in window)) return;
+  const vs=speechSynthesis.getVoices();
+  voice = vs.find(v=>v.lang===CONFIG.LANG) || vs.find(v=>v.lang.startsWith("en")) || null;
+}
+if("speechSynthesis" in window){ pickVoice(); speechSynthesis.onvoiceschanged=pickVoice; }
+function speak(){
+  if(!("speechSynthesis" in window)||!items.length) return;
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(cur().text);
+  u.lang=CONFIG.LANG; if(voice) u.voice=voice; u.rate=rate;
+  speechSynthesis.speak(u);
+}
+
+/* ===== 이벤트 ===== */
+$("prev").onclick=()=>go(-1);
+$("next").onclick=()=>go(1);
+$("speak").onclick=speak;
+$("done").onclick=()=>bump(1);
+$("undo").onclick=()=>bump(-1);
+$("reload").onclick=async()=>{ $("pos").textContent="불러오는 중…"; if(await refresh()) selectTab(tab); };
+$("mode").onclick=()=>{
+  const i=MODES.findIndex(m=>m[0]===mode); mode=MODES[(i+1)%MODES.length][0];
+  store.set("ep_mode",mode); buildOrder(); idx=0; render();
+};
+function updateRate(){ $("rate").textContent="속도 "+(rate===1?"1×":"0.7×"); }
+$("rate").onclick=()=>{ rate=rate===1?0.7:1; store.set("ep_rate",rate); updateRate(); };
+updateRate();
+
+let sx=null, sy=null;
+const stage=$("stage");
+stage.addEventListener("touchstart",e=>{ sx=e.touches[0].clientX; sy=e.touches[0].clientY; },{passive:true});
+stage.addEventListener("touchend",e=>{
+  if(sx===null) return;
+  const dx=e.changedTouches[0].clientX-sx, dy=e.changedTouches[0].clientY-sy; sx=null;
+  if(Math.abs(dx)>50 && Math.abs(dx)>Math.abs(dy)*1.5) go(dx<0?1:-1);
+},{passive:true});
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowRight") go(1); else if(e.key==="ArrowLeft") go(-1);
+  else if(e.key==="Enter") bump(1); else if(e.key===" "){ e.preventDefault(); speak(); }
+});
+window.addEventListener("online",flush);
+
+/* ===== 시작 ===== */
+(async function init(){
+  if(CONFIG.API_URL){
+    data=store.get("ep_data_v2",null);
+    if(data){ rebuildCounts(); selectTab(tab); }       // 캐시로 즉시 표시
+  }
+  if(await refresh()) selectTab(tab);
+  flush();
+})();
+</script>
+</body>
+</html>
